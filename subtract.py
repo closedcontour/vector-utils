@@ -5,7 +5,7 @@ except ImportError:
 
 import sys, os
 
-def difference(sourceFile, maskFile):
+def subtract(sourceFile, maskFile):
     outputFileName = 'difference'
     
     driver = ogr.GetDriverByName("ESRI Shapefile")
@@ -14,15 +14,14 @@ def difference(sourceFile, maskFile):
     sourceLayer = source.GetLayer()
 
     if source is None:
-        print "Could not open file ", source
+        print "Could not open file ", sourceFile
         sys.exit(1)
 
     mask = driver.Open(maskFile,0)
     maskLayer = mask.GetLayer()
-    maskFeature = maskLayer.GetNextFeature()
 
     if mask is None:
-        print "Could not open file ", mask
+        print "Could not open file ", maskFile
 
     ### Create output file ###
     if os.path.exists(outputFileName):
@@ -33,7 +32,8 @@ def difference(sourceFile, maskFile):
         print 'Could not create output datasource ', outputFileName
         sys.exit(1)
 
-    newLayer = output.CreateLayer('difference',geom_type=ogr.wkbPolygon,srs=sourceLayer.GetSpatialRef())
+    # newLayer = output.CreateLayer('difference',geom_type=ogr.wkbPolygon,srs=sourceLayer.GetSpatialRef())
+    newLayer = output.CreateLayer('difference',geom_type=ogr.wkbMultiLineString,srs=sourceLayer.GetSpatialRef())
 
     prototypeFeature = sourceLayer.GetFeature(0)
     for i in range(prototypeFeature.GetFieldCount()):
@@ -47,65 +47,41 @@ def difference(sourceFile, maskFile):
     newLayerDef = newLayer.GetLayerDefn()
     ##############################
 
+    processedCount = 0
     featureID = 0
-
-
     total = sourceLayer.GetFeatureCount()
 
-    # This only works with one mask feature, need to invert nested loops
-    while maskFeature:
+    sourceFeature = sourceLayer.GetNextFeature()
+    while sourceFeature:
+        sourceGeom = sourceFeature.GetGeometryRef()
 
-        maskGeom = maskFeature.GetGeometryRef()
-        sourceLayer.ResetReading()
-        sourceFeature = sourceLayer.GetNextFeature()
-
-        while sourceFeature:
-            sourceGeom = sourceFeature.GetGeometryRef()
-            
-            newGeom = None
-            if sourceGeom.Intersects(maskGeom) == 1:
-                newGeom = sourceGeom.Difference(maskGeom)
-                # if newGeom.GetArea() > 0:
-                #     newFeature = ogr.Feature(newLayerDef)
-                #     # newFeature = maskGeom.Clone()
-                #     newFeature.SetGeometry(newGeom)
-                #     newFeature.SetFID(featureID)
-                #     newLayer.CreateFeature(newFeature)
-                #     featureID += 1
-                #     newFeature.Destroy()
-            
-            else:
-                newGeom = sourceGeom
-                # newFeature2 = ogr.Feature(newLayerDef)
-                # newFeature2.SetGeometry(sourceGeom)
-                # newFeature2.SetFID(featureID)
-                # newLayer.CreateFeature(newFeature2)
-                # featureID += 1
-            
-                # newFeature1.Destroy()
-                # newFeature2.Destroy()
-
-            if newGeom.GetArea() > 0:
-                newFeature = ogr.Feature(newLayerDef)
-                newFeature.SetGeometry(newGeom)
-                newFeature.SetFID(featureID)
-                for i in range(sourceFeature.GetFieldCount()):
-                    newFeature.SetField(i, sourceFeature.GetField(i))
-                # newFeature.SetField('id', inFeature.GetField('id'))
-                newLayer.CreateFeature(newFeature)
-                featureID += 1
-                newFeature.Destroy()
-
-
-            sourceFeature.Destroy()
-            sourceFeature = sourceLayer.GetNextFeature()
-            print "%d / %d" % (featureID, total)
-        
-        maskFeature.Destroy()
+        maskLayer.ResetReading()
+        maskLayer.SetSpatialFilter(sourceGeom)
         maskFeature = maskLayer.GetNextFeature()
+
+        while maskFeature:
+            maskGeom = maskFeature.GetGeometryRef()
+            sourceGeom = sourceGeom.Difference(maskGeom)
+            maskFeature.Destroy()
+            maskFeature = maskLayer.GetNextFeature()
+
+        if sourceGeom.Length() > 0:
+            newFeature = ogr.Feature(newLayerDef)
+            newFeature.SetGeometry(sourceGeom)
+            newFeature.SetFID(featureID)
+            for i in range(sourceFeature.GetFieldCount()):
+                newFeature.SetField(i, sourceFeature.GetField(i))
+            newLayer.CreateFeature(newFeature)
+            featureID += 1
+            newFeature.Destroy()
+
+        sourceFeature.Destroy()
+        sourceFeature = sourceLayer.GetNextFeature()
+        processedCount += 1
+        print "%d / %d / %d" % (processedCount, featureID, total)
         
     source.Destroy()
     mask.Destroy()
 
 if __name__ == "__main__":
-    difference('calveg_wgs84.shp', '../../park_boundary/processed/yose_park_boundary_wgs84.shp')
+    subtract(sys.argv[1], sys.argv[2])
